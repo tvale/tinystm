@@ -39,8 +39,8 @@ include Makefile.common
 # Refer to [PPoPP-08] for more details.
 ########################################################################
 
-DEFINES += -DDESIGN=WRITE_BACK_ETL
-# DEFINES += -DDESIGN=WRITE_BACK_CTL
+# DEFINES += -DDESIGN=WRITE_BACK_ETL
+DEFINES += -DDESIGN=WRITE_BACK_CTL
 # DEFINES += -DDESIGN=WRITE_THROUGH
 # DEFINES += -DDESIGN=MODULAR
 
@@ -94,10 +94,10 @@ DEFINES += -DIRREVOCABLE_ENABLED
 # from disabling them.
 ########################################################################
 
-# DEFINES += -DTM_STATISTICS
-DEFINES += -UTM_STATISTICS
-# DEFINES += -DTM_STATISTICS2
-DEFINES += -UTM_STATISTICS2
+DEFINES += -DTM_STATISTICS
+# DEFINES += -UTM_STATISTICS
+DEFINES += -DTM_STATISTICS2
+# DEFINES += -UTM_STATISTICS2
 
 ########################################################################
 # Prevent duplicate entries in read/write sets when accessing the same
