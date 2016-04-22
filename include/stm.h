@@ -175,7 +175,7 @@ typedef union stm_tx_attr {
    * (Working only with IRREVOCABLE_ENABLED)
    * TODO Not yet implemented
    */
-  /* unsigned int irrevocable : 2; */ //uncomment this and use it as privileged?
+  /* unsigned int irrevocable : 2; */
   };
   /**
    * All transaction attributes represented as one integer.
