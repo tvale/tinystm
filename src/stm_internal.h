@@ -45,7 +45,7 @@
 #define MODULAR                         3
 
 #ifndef DESIGN
-# define DESIGN                         WRITE_BACK_ETL
+# define DESIGN                         WRITE_BACK_CTL
 #endif /* ! DESIGN */
 
 /* Contention managers */
@@ -53,6 +53,8 @@
 #define CM_DELAY                        1
 #define CM_BACKOFF                      2
 #define CM_MODULAR                      3
+
+#define IRREVOCABLE_ENABLED
 
 #ifndef CM
 # define CM                             CM_SUICIDE
@@ -245,7 +247,16 @@ enum {                                  /* Transaction status */
 #define CLOCK                           (_tinystm.gclock[(CACHELINE_SIZE * 2) / sizeof(stm_word_t)])
 
 #define GET_CLOCK                       (ATOMIC_LOAD_ACQ(&CLOCK))
-#define FETCH_INC_CLOCK                 (ATOMIC_FETCH_INC_FULL(&CLOCK))
+#define FETCH_INC_CLOCK                 (ATOMIC_FETCH_INC_FULL(&CLOCK)) //need fetch_and_add2
+
+/* ################################################################### *
+ * //PRIVILEGED TIMESTAMP
+ * ################################################################### */
+
+#define PRIVILEGED_TS                   (_tinystm.privileged_ts)
+
+#define GET_PRIVILEGED_TS               (ATOMIC_LOAD_ACQ(&PRIVILEGED_TS))
+#define FETCH_INC_PRIVILEGED_TS         (ATOMIC_FETCH_INC_FULL(&PRIVILEGED_TS)) //need fetch_and_add2
 
 /* ################################################################### *
  * CALLBACKS
@@ -365,6 +376,7 @@ typedef struct stm_tx {                 /* Transaction descriptor */
 typedef struct {
   volatile stm_word_t locks[LOCK_ARRAY_SIZE] ALIGNED;
   volatile stm_word_t gclock[512 / sizeof(stm_word_t)] ALIGNED;
+  volatile unsigned long privileged_ts;
   unsigned int nb_specific;             /* Number of specific slots used (<= MAX_SPECIFIC) */
   unsigned int nb_init_cb;
   cb_entry_t init_cb[MAX_CB];           /* Init thread callbacks */
