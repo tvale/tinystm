@@ -127,6 +127,11 @@ struct stm_tx *stm_current_tx(void) _CALLCONV;
  */
 typedef uintptr_t stm_word_t;
 
+typedef struct two_timestamp_lock {
+  stm_word_t original_lock;
+  stm_word_t read_ts;
+} two_timestamp_lock_t;
+
 /**
  * Transaction attributes specified by the application.
  */

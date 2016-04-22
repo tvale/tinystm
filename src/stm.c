@@ -266,7 +266,7 @@ stm_init(void)
 #endif /* CM == CM_MODULAR */
 
   /* Set locks and clock but should be already to 0 */
-  memset((void *)_tinystm.locks, 0, LOCK_ARRAY_SIZE * sizeof(stm_word_t));
+  memset((void *)_tinystm.locks, 0, LOCK_ARRAY_SIZE * sizeof(two_timestamp_lock_t));
   CLOCK = 0;
 
   stm_quiesce_init();
