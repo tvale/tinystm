@@ -165,7 +165,7 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
  restart:
   l = ATOMIC_LOAD_ACQ(lock);
  restart_no_load:
-  if (LOCK_GET_WRITE(l)) {
+  if (LOCK_GET_WRITE(l)) { //is this checking if someone is currently writing to the variable?
     /* Locked */
     /* Do we own the lock? */
     /* Spin while locked (should not last long) */
@@ -178,15 +178,23 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
       l = l2;
       goto restart_no_load;
     }
-#ifdef IRREVOCABLE_ENABLED
+#ifdef IRREVOCABLE_ENABLED //use this setting?
     /* In irrevocable mode, no need check timestamp nor add entry to read set */
-    if (tx->irrevocable)
+    if (tx->irrevocable){
+
+      // set-read-ts(x, privileged-ts)
+
+
+      // wait until is-unlocked(x)
+
       goto return_value;
+    }
 #endif /* IRREVOCABLE_ENABLED */
     /* Check timestamp */
-    version = LOCK_GET_TIMESTAMP(l);
+    version = LOCK_GET_TIMESTAMP(l); //need read and write timestamps for each object lock (write-ts and read-ts)
     /* Valid version? */
-    if (version > tx->end) {
+    if (version > tx->end) { // if write-ts(x) > valid-ts
+      //or (write-ts(x) > privileged-ts and parity(write-ts(x)) = parity(privileged-ts))
       /* No: try to extend first (except for read-only transactions: no read set) */
       if (tx->attr.read_only || !stm_wbctl_extend(tx)) {
         /* Not much we can do: abort */
