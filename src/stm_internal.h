@@ -54,8 +54,6 @@
 #define CM_BACKOFF                      2
 #define CM_MODULAR                      3
 
-#define IRREVOCABLE_ENABLED
-
 #ifndef CM
 # define CM                             CM_SUICIDE
 #endif /* ! CM */
@@ -234,9 +232,11 @@ enum {                                  /* Transaction status */
 # if LOCK_ARRAY_LOG_SIZE < 16
 #  error "LOCK_IDX_SWAP requires LOCK_ARRAY_LOG_SIZE to be at least 16"
 # endif /* LOCK_ARRAY_LOG_SIZE < 16 */
-# define GET_LOCK(a)                    (_tinystm.locks + lock_idx_swap(LOCK_IDX(a)))
+# define GET_LOCK(a)                    &(_tinystm.locks[lock_idx_swap(LOCK_IDX(a))].original_lock)
 #else /* ! LOCK_IDX_SWAP */
-# define GET_LOCK(a)                    (_tinystm.locks + LOCK_IDX(a))
+# define GET_LOCK(a)                    &(_tinystm.locks[LOCK_IDX(a)].original_lock)
+# define GET_READ_TS(a)                 &(_tinystm.locks[LOCK_IDX(a)].read_ts)
+# define SET_READ_TS(a, ts)             _tinystm.locks[LOCK_IDX(a)].read_ts = ts // use atomic_load instead?
 #endif /* ! LOCK_IDX_SWAP */
 
 /* ################################################################### *
@@ -374,7 +374,7 @@ typedef struct stm_tx {                 /* Transaction descriptor */
 
 /* This structure should be ordered by hot and cold variables */
 typedef struct {
-  volatile stm_word_t locks[LOCK_ARRAY_SIZE] ALIGNED;
+  volatile two_timestamp_lock_t locks[LOCK_ARRAY_SIZE] ALIGNED;
   volatile stm_word_t gclock[512 / sizeof(stm_word_t)] ALIGNED;
   volatile unsigned long privileged_ts;
   unsigned int nb_specific;             /* Number of specific slots used (<= MAX_SPECIFIC) */
@@ -671,9 +671,9 @@ rollover_clock(void *arg)
   PRINT_DEBUG("==> rollover_clock()\n");
 
   /* Reset clock */
-  CLOCK = 0;
+  CLOCK = 2;
   /* Reset timestamps */
-  memset((void *)_tinystm.locks, 0, LOCK_ARRAY_SIZE * sizeof(stm_word_t));
+  memset((void *)_tinystm.locks, 0, LOCK_ARRAY_SIZE * sizeof(two_timestamp_lock_t));
 # ifdef EPOCH_GC
   /* Reset GC */
   gc_reset();

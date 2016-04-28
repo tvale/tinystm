@@ -127,6 +127,11 @@ struct stm_tx *stm_current_tx(void) _CALLCONV;
  */
 typedef uintptr_t stm_word_t;
 
+typedef struct two_timestamp_lock {
+  stm_word_t original_lock;
+  stm_word_t read_ts;
+} two_timestamp_lock_t;
+
 /**
  * Transaction attributes specified by the application.
  */
@@ -593,7 +598,6 @@ int stm_register(void (*on_thread_init)(void *arg),
  * but may get delayed.
  *
  * @param addr Address of the memory location.
-
  * @param timestamp If non-null, the referenced variable is updated to
  *   hold the timestamp of the memory location being read.
  * @return

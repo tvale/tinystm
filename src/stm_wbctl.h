@@ -138,6 +138,7 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
 {
   volatile stm_word_t *lock;
   stm_word_t l, l2, value, version;
+  unsigned long privileged_ts;
   r_entry_t *r;
   w_entry_t *written = NULL;
 
@@ -182,8 +183,7 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
     /* In irrevocable mode, no need check timestamp nor add entry to read set */
     if (tx->irrevocable){
 
-      // set-read-ts(x, privileged-ts)
-
+      SET_READ_TS(addr, _tinystm.privileged_ts);
 
       // wait until is-unlocked(x)
 
@@ -191,10 +191,13 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
     }
 #endif /* IRREVOCABLE_ENABLED */
     /* Check timestamp */
-    version = LOCK_GET_TIMESTAMP(l); //need read and write timestamps for each object lock (write-ts and read-ts)
+    version = LOCK_GET_TIMESTAMP(l);
     /* Valid version? */
-    if (version > tx->end) { // if write-ts(x) > valid-ts
-      //or (write-ts(x) > privileged-ts and parity(write-ts(x)) = parity(privileged-ts))
+    privileged_ts = GET_PRIVILEGED_TS;
+    // if write-ts(x) > valid-ts
+    if (version > tx->end ||
+        //or (write-ts(x) > privileged-ts and parity(write-ts(x)) = parity(privileged-ts))
+       (version > privileged_ts && (version % 2 == privileged_ts % 2))) {
       /* No: try to extend first (except for read-only transactions: no read set) */
       if (tx->attr.read_only || !stm_wbctl_extend(tx)) {
         /* Not much we can do: abort */
@@ -369,7 +372,7 @@ stm_wbctl_commit(stm_tx_t *tx)
   w_entry_t *w;
   stm_word_t t;
   int i;
-  stm_word_t l, value;
+  stm_word_t l, value, read_ts, write_ts, privileged_ts;
 
   PRINT_DEBUG("==> stm_wbctl_commit(%p[%lu-%lu])\n", tx, (unsigned long)tx->start, (unsigned long)tx->end);
 
@@ -406,6 +409,19 @@ stm_wbctl_commit(stm_tx_t *tx)
       stm_rollback(tx, STM_ABORT_WW_CONFLICT);
       return 0;
     }
+
+    read_ts = ATOMIC_LOAD(GET_READ_TS(w->addr)); //ATOMIC_LOAD_ACQ ?
+    write_ts = LOCK_GET_TIMESTAMP(l);
+    privileged_ts = GET_PRIVILEGED_TS;
+    if(read_ts == privileged_ts ||
+      (write_ts > privileged_ts && (write_ts % 2 == privileged_ts % 2))) {
+
+      /* Abort self */
+      stm_rollback(tx, STM_ABORT_WW_CONFLICT);
+      return 0;
+
+    }
+
     if (ATOMIC_CAS_FULL(w->lock, l, LOCK_SET_ADDR_WRITE((stm_word_t)w)) == 0)
       goto restart;
     /* We own the lock here */
@@ -438,7 +454,9 @@ stm_wbctl_commit(stm_tx_t *tx)
 #endif /* IRREVOCABLE_ENABLED */
 
   /* Get commit timestamp (may exceed VERSION_MAX by up to MAX_THREADS) */
-  t = FETCH_INC_CLOCK + 1;
+  // need FETCH_INC2
+  t = FETCH_INC_CLOCK + 2;
+  FETCH_INC_CLOCK;
 
 #ifdef IRREVOCABLE_ENABLED
   if (unlikely(tx->irrevocable))
@@ -446,7 +464,7 @@ stm_wbctl_commit(stm_tx_t *tx)
 #endif /* IRREVOCABLE_ENABLED */
 
   /* Try to validate (only if a concurrent transaction has committed since tx->start) */
-  if (unlikely(tx->start != t - 1 && !stm_wbctl_validate(tx))) {
+  if (unlikely(tx->start != t - 2 && !stm_wbctl_validate(tx))) {
     /* Cannot commit */
     stm_rollback(tx, STM_ABORT_VALIDATE);
     return 0;
