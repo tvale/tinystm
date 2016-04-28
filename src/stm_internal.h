@@ -237,6 +237,8 @@ enum {                                  /* Transaction status */
 # define GET_LOCK(a)                    &(_tinystm.locks[lock_idx_swap(LOCK_IDX(a))].original_lock)
 #else /* ! LOCK_IDX_SWAP */
 # define GET_LOCK(a)                    &(_tinystm.locks[LOCK_IDX(a)].original_lock)
+# define GET_READ_TS(a)                 &(_tinystm.locks[LOCK_IDX(a)].read_ts)
+# define SET_READ_TS(a, ts)             _tinystm.locks[LOCK_IDX(a)].read_ts = ts
 #endif /* ! LOCK_IDX_SWAP */
 
 /* ################################################################### *
@@ -311,7 +313,8 @@ typedef struct w_set {                  /* Write set */
   unsigned int size;                    /* Size of array */
   union {
     unsigned int has_writes;            /* WRITE_BACK_ETL: Has the write set any real write (vs. visible reads) */
-    unsigned int nb_acquired;           /* WRITE_BACK_CTL: Number of locks acquired */
+    unsigned int nb_acquired;          r[1].original_lock = 5;
+     /* WRITE_BACK_CTL: Number of locks acquired */
   };
 #ifdef USE_BLOOM_FILTER
   stm_word_t bloom;                     /* WRITE_BACK_CTL: Same Bloom filter as in TL2 */
