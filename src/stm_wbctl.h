@@ -182,7 +182,7 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
     /* In irrevocable mode, no need check timestamp nor add entry to read set */
     if (tx->irrevocable){
 
-      SET_READ_TS(addr, _tinystm.privileged_ts)
+      SET_READ_TS(addr, _tinystm.privileged_ts);
 
       // wait until is-unlocked(x)
 
