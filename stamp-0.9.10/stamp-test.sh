@@ -36,6 +36,10 @@ do
 threads=$1
 shift
 
+currentdate=$(date +"%Y-%m-%d-%T")
+
+mkdir -p ./test-results/${currentdate}
+
 if [ "${exp}" = "sim" ]; then
 
 for test in \
@@ -51,8 +55,12 @@ for test in \
     "./yada/yada -a20 -i yada/inputs/633.2 -t"
 do
 
+IFS=/ read -ra SPLITSTRING <<< $test
+
+testname=${SPLITSTRING[1]}
+
 echo "Executing: ${test} ${threads}" | tee -a ${log}
-exec $test $threads | tee -a ${log}
+exec $test $threads | tee -a ${log} > ./test-results/$currentdate/$testname
 
 done
 
