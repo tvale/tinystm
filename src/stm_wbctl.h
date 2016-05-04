@@ -410,7 +410,7 @@ stm_wbctl_commit(stm_tx_t *tx)
       return 0;
     }
 
-    read_ts = ATOMIC_LOAD(GET_READ_TS(w->addr)); //ATOMIC_LOAD_ACQ ?
+    read_ts = ATOMIC_LOAD_ACQ(GET_READ_TS(w->addr));
     write_ts = LOCK_GET_TIMESTAMP(l);
     privileged_ts = GET_PRIVILEGED_TS;
     if(read_ts == privileged_ts ||
@@ -454,9 +454,7 @@ stm_wbctl_commit(stm_tx_t *tx)
 #endif /* IRREVOCABLE_ENABLED */
 
   /* Get commit timestamp (may exceed VERSION_MAX by up to MAX_THREADS) */
-  // need FETCH_INC2
-  t = FETCH_INC_CLOCK + 2;
-  FETCH_INC_CLOCK;
+  t = FETCH_INC2_CLOCK + 2;
 
 #ifdef IRREVOCABLE_ENABLED
   if (unlikely(tx->irrevocable))

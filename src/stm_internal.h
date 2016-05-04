@@ -248,6 +248,7 @@ enum {                                  /* Transaction status */
 
 #define GET_CLOCK                       (ATOMIC_LOAD_ACQ(&CLOCK))
 #define FETCH_INC_CLOCK                 (ATOMIC_FETCH_INC_FULL(&CLOCK)) //need fetch_and_add2
+#define FETCH_INC2_CLOCK                (ATOMIC_FETCH_ADD_FULL(&CLOCK, 2))
 
 /* ################################################################### *
  * //PRIVILEGED TIMESTAMP
@@ -257,6 +258,7 @@ enum {                                  /* Transaction status */
 
 #define GET_PRIVILEGED_TS               (ATOMIC_LOAD_ACQ(&PRIVILEGED_TS))
 #define FETCH_INC_PRIVILEGED_TS         (ATOMIC_FETCH_INC_FULL(&PRIVILEGED_TS)) //need fetch_and_add2
+#define FETCH_INC2_PRIVILEGED_TS        (ATOMIC_FETCH_ADD_FULL(&PRIVILEGED_TS, 2))
 
 /* ################################################################### *
  * CALLBACKS
