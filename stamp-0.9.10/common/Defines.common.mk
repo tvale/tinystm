@@ -7,7 +7,11 @@
 
 CC       := gcc
 CFLAGS   += -Wall -pthread
-CFLAGS   += -O3
+ifeq ($(CFG),debug)
+  CFLAGS += -O0 -g
+else
+  CFLAGS += -O3
+endif
 CFLAGS   += -I$(LIB)
 CPP      := g++
 CPPFLAGS += $(CFLAGS)
