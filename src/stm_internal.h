@@ -236,7 +236,7 @@ enum {                                  /* Transaction status */
 #else /* ! LOCK_IDX_SWAP */
 # define GET_LOCK(a)                    &(_tinystm.locks[LOCK_IDX(a)].original_lock)
 # define GET_READ_TS(a)                 &(_tinystm.locks[LOCK_IDX(a)].read_ts)
-# define SET_READ_TS(a, ts)             _tinystm.locks[LOCK_IDX(a)].read_ts = ts // use atomic_load instead?
+# define SET_READ_TS(a, ts)             (ATOMIC_STORE_REL(GET_READ_TS(a), ts)) // store_release needed?
 #endif /* ! LOCK_IDX_SWAP */
 
 /* ################################################################### *
@@ -257,6 +257,7 @@ enum {                                  /* Transaction status */
 #define PRIVILEGED_TS                   (_tinystm.privileged_ts)
 
 #define GET_PRIVILEGED_TS               (ATOMIC_LOAD_ACQ(&PRIVILEGED_TS))
+//SET_PRIVILEGED_TS needed?
 #define FETCH_INC_PRIVILEGED_TS         (ATOMIC_FETCH_INC_FULL(&PRIVILEGED_TS)) //need fetch_and_add2
 #define FETCH_INC2_PRIVILEGED_TS        (ATOMIC_FETCH_ADD_FULL(&PRIVILEGED_TS, 2))
 
@@ -932,12 +933,14 @@ int_stm_prepare(stm_tx_t *tx)
 #endif /* EPOCH_GC */
 
 #ifdef IRREVOCABLE_ENABLED
+  /* just for 1 thread tests
   if (unlikely(tx->irrevocable != 0)) {
     assert(!IS_ACTIVE(tx->status));
     stm_set_irrevocable_tx(tx, -1);
     UPDATE_STATUS(tx->status, TX_IRREVOCABLE);
   } else
     UPDATE_STATUS(tx->status, TX_ACTIVE);
+    */
 #else /* ! IRREVOCABLE_ENABLED */
   /* Set status */
   UPDATE_STATUS(tx->status, TX_ACTIVE);
@@ -1267,7 +1270,17 @@ int_stm_init_thread(void)
 # endif /* READ_LOCKED_DATA */
 #endif /* TM_STATISTICS2 */
 #ifdef IRREVOCABLE_ENABLED
-  tx->irrevocable = 0;
+  if(_tinystm.irrevocable == 0){
+    tx->irrevocable = 1; // just for 1 thread tests
+    _tinystm.irrevocable = 1;
+    printf("priv");
+    printf("\n");
+  }
+  else{
+    tx->irrevocable = 0;
+    printf("spec");
+    printf("\n");
+  }
 #endif /* IRREVOCABLE_ENABLED */
   /* Store as thread-local data */
   tls_set_tx(tx);
@@ -1429,12 +1442,14 @@ int_stm_commit(stm_tx_t *tx)
 #endif /* CM == CM_MODULAR */
 
 #ifdef IRREVOCABLE_ENABLED
+  /* just for 1 thread tests
   if (unlikely(tx->irrevocable)) {
     ATOMIC_STORE(&_tinystm.irrevocable, 0);
     if ((tx->irrevocable & 0x08) != 0)
-      stm_quiesce_release(tx);
+      stm_quiesce_release(tx);       what is this?
     tx->irrevocable = 0;
   }
+  */
 #endif /* IRREVOCABLE_ENABLED */
 
   /* Set status to COMMITTED */
