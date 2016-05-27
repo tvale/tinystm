@@ -203,7 +203,7 @@ enum {                                  /* Transaction status */
 # define LOCK_UPGRADE(l)                (l | WRITE_MASK)
 #endif /* CM == CM_MODULAR */
 #define LOCK_GET_TIMESTAMP(l)           (l >> (LOCK_BITS))
-#define LOCK_SET_TIMESTAMP(t)           (t << (LOCK_BITS))
+#define LOCK_SET_TIMESTAMP(t)           ((t) << (LOCK_BITS))
 #define LOCK_GET_INCARNATION(l)         ((l & INCARNATION_MASK) >> OWNED_BITS)
 #define LOCK_SET_INCARNATION(i)         (i << OWNED_BITS)   /* OWNED bit not set */
 #define LOCK_UPD_INCARNATION(l, i)      ((l & ~(stm_word_t)(INCARNATION_MASK | OWNED_MASK)) | LOCK_SET_INCARNATION(i))
@@ -334,6 +334,7 @@ typedef struct stm_tx {                 /* Transaction descriptor */
   stm_word_t end;                       /* End timestamp (validity range) */
   r_set_t r_set;                        /* Read set */
   w_set_t w_set;                        /* Write set */
+  unsigned int privileged;
 #ifdef IRREVOCABLE_ENABLED
   unsigned int irrevocable:4;           /* Is this execution irrevocable? */
 #endif /* IRREVOCABLE_ENABLED */
@@ -379,7 +380,7 @@ typedef struct stm_tx {                 /* Transaction descriptor */
 typedef struct {
   volatile two_timestamp_lock_t locks[LOCK_ARRAY_SIZE] ALIGNED;
   volatile stm_word_t gclock[512 / sizeof(stm_word_t)] ALIGNED;
-  volatile unsigned long privileged_ts;
+  volatile long unsigned int privileged_ts;
   unsigned int nb_specific;             /* Number of specific slots used (<= MAX_SPECIFIC) */
   unsigned int nb_init_cb;
   cb_entry_t init_cb[MAX_CB];           /* Init thread callbacks */
@@ -394,6 +395,7 @@ typedef struct {
   unsigned int nb_abort_cb;
   cb_entry_t abort_cb[MAX_CB];          /* Abort callbacks */
   unsigned int initialized;             /* Has the library been initialized? */
+  volatile stm_word_t privileged;
 #ifdef IRREVOCABLE_ENABLED
   volatile stm_word_t irrevocable;      /* Irrevocability status */
 #endif /* IRREVOCABLE_ENABLED */
@@ -675,6 +677,8 @@ rollover_clock(void *arg)
 
   /* Reset clock */
   CLOCK = 2;
+  printf("rolled over");
+  printf("\n");
   /* Reset timestamps */
   memset((void *)_tinystm.locks, 0, LOCK_ARRAY_SIZE * sizeof(two_timestamp_lock_t));
 # ifdef EPOCH_GC
@@ -933,14 +937,13 @@ int_stm_prepare(stm_tx_t *tx)
 #endif /* EPOCH_GC */
 
 #ifdef IRREVOCABLE_ENABLED
-  /* just for 1 thread tests
   if (unlikely(tx->irrevocable != 0)) {
     assert(!IS_ACTIVE(tx->status));
-    stm_set_irrevocable_tx(tx, -1);
-    UPDATE_STATUS(tx->status, TX_IRREVOCABLE);
+    //stm_set_irrevocable_tx(tx, -1);
+    UPDATE_STATUS(tx->status, TX_ACTIVE);
   } else
     UPDATE_STATUS(tx->status, TX_ACTIVE);
-    */
+
 #else /* ! IRREVOCABLE_ENABLED */
   /* Set status */
   UPDATE_STATUS(tx->status, TX_ACTIVE);
@@ -1282,6 +1285,13 @@ int_stm_init_thread(void)
     printf("\n");
   }
 #endif /* IRREVOCABLE_ENABLED */
+  if(ATOMIC_CAS_FULL(&_tinystm.privileged, 0, 1) != 0){
+    tx->privileged = 1;
+  }
+  else{
+    tx->privileged = 0;
+  }
+
   /* Store as thread-local data */
   tls_set_tx(tx);
   stm_quiesce_enter_thread(tx);
@@ -1405,7 +1415,7 @@ int_stm_commit(stm_tx_t *tx)
 #endif /* CM == CM_MODULAR */
 
   /* A read-only transaction can commit immediately */
-  if (unlikely(tx->w_set.nb_entries == 0))
+  if (!(tx->privileged) && unlikely(tx->w_set.nb_entries == 0))
     goto end;
 
   /* Update transaction */

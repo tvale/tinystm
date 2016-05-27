@@ -61,6 +61,7 @@ static const char *cm_names[] = {
 global_t _tinystm =
     { .nb_specific = 0
     , .initialized = 0
+    , .privileged = 0
 #ifdef IRREVOCABLE_ENABLED
     , .irrevocable = 0
 #endif /* IRREVOCABLE_ENABLED */

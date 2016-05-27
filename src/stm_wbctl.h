@@ -131,6 +131,12 @@ stm_wbctl_rollback(stm_tx_t *tx)
       }
     } while (tx->w_set.nb_acquired > 0);
   }
+
+
+  while(ATOMIC_CAS_FULL(&_tinystm.privileged, 0, 1) == 0){}
+
+  tx->privileged = 1;
+
 }
 
 static INLINE stm_word_t
@@ -138,7 +144,7 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
 {
   volatile stm_word_t *lock;
   stm_word_t l, l2, value, version;
-  unsigned long privileged_ts;
+  unsigned long privileged_ts, privileged_ts2;
   r_entry_t *r;
   w_entry_t *written = NULL;
 
@@ -166,6 +172,12 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
     }
 #endif /* IRREVOCABLE_ENABLED */
 
+    if (tx->privileged){
+
+      SET_READ_TS(addr, _tinystm.privileged_ts);
+
+    }
+
   /* Get reference to lock */
   lock = GET_LOCK(addr);
 
@@ -182,23 +194,36 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
     goto restart;
   } else {
     /* Not locked */
+    //privileged_ts = GET_PRIVILEGED_TS; // new - need to load both at the same time?
     value = ATOMIC_LOAD_ACQ(addr);
+    //privileged_ts2 = GET_PRIVILEGED_TS;
+    //if(privileged_ts != privileged_ts2)
+      //goto restart;
     l2 = ATOMIC_LOAD_ACQ(lock);
     if (l != l2) {
       l = l2;
       goto restart_no_load;
     }
-#ifdef IRREVOCABLE_ENABLED //use this setting?
+#ifdef IRREVOCABLE_ENABLED
     /* In irrevocable mode, no need check timestamp nor add entry to read set */
     if (tx->irrevocable){
 
       goto return_value;
     }
 #endif /* IRREVOCABLE_ENABLED */
+
+    if(tx->privileged){
+      goto return_value;
+    }
+
     /* Check timestamp */
     version = LOCK_GET_TIMESTAMP(l);
+
+    privileged_ts = GET_PRIVILEGED_TS; //new - comment this
+
+    assert(privileged_ts % 2 == 1);
+
     /* Valid version? */
-    privileged_ts = GET_PRIVILEGED_TS;
     // if write-ts(x) > valid-ts
     if (version > tx->end ||
         //or (write-ts(x) > privileged-ts and parity(write-ts(x)) = parity(privileged-ts))
@@ -270,6 +295,16 @@ stm_wbctl_write(stm_tx_t *tx, volatile stm_word_t *addr, stm_word_t value, stm_w
       goto write_directly;
   }
 #endif /* IRREVOCABLE_ENABLED */
+
+  if(tx->privileged){
+      restart_irrevocable:
+        l = ATOMIC_LOAD_ACQ(lock);
+        new_write_ts = LOCK_SET_TIMESTAMP(GET_CLOCK + 1);
+        if(LOCK_GET_OWNED(l) || ATOMIC_CAS_FULL(lock, l, new_write_ts) == 0)
+          goto restart_irrevocable;
+
+        goto write_directly;
+    }
 
   /* Try to acquire lock */
  restart:
@@ -345,6 +380,17 @@ write_directly:
 
 #endif /* IRREVOCABLE_ENABLED */
 
+  if(tx->privileged){
+    write_directly:
+      if (mask != 0) {
+        if (mask != ~(stm_word_t)0){
+          stm_word_t old_value = ATOMIC_LOAD(addr);
+          value = (old_value & ~mask) | (value & mask);
+        }
+        ATOMIC_STORE(addr, value);
+      }
+  }
+
   return w;
 }
 
@@ -401,6 +447,18 @@ stm_wbctl_commit(stm_tx_t *tx)
   }
 #endif /* IRREVOCABLE_ENABLED */
 
+  if (tx->privileged) {
+    // commit_ts = commit_ts + 2
+    stm_word_t new_privileged_ts = FETCH_INC2_CLOCK + 1;
+    assert(new_privileged_ts % 2 == 1);
+    // privileged_ts = commit_ts + 1
+    PRIVILEGED_TS = new_privileged_ts;
+
+    tx->privileged = 0;
+    ATOMIC_STORE_REL(&_tinystm.privileged, 0);
+    return 1;
+  }
+
   w_entry_t *w;
   stm_word_t t;
   int i;
@@ -454,6 +512,7 @@ stm_wbctl_commit(stm_tx_t *tx)
     read_ts = ATOMIC_LOAD_ACQ(GET_READ_TS(w->addr));
     write_ts = LOCK_GET_TIMESTAMP(l);
     privileged_ts = GET_PRIVILEGED_TS;
+    assert(privileged_ts % 2 == 1);
     if(read_ts == privileged_ts ||
       (write_ts > privileged_ts && (write_ts % 2 == privileged_ts % 2))) {
 
