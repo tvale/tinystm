@@ -132,14 +132,14 @@ stm_wbctl_rollback(stm_tx_t *tx)
     } while (tx->w_set.nb_acquired > 0);
   }
 
-
+/*
   while(ATOMIC_CAS_FULL(&_tinystm.privileged, 0, 1) == 0){
     printf("couldn't become privileged - tx address: %p\n", tx);
     printf("\n");
   }
 
   tx->privileged = 1;
-
+*/
 }
 
 static INLINE stm_word_t
@@ -177,7 +177,9 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
 
     if (tx->privileged){
 
-      SET_READ_TS(addr, _tinystm.privileged_ts);
+      SET_READ_TS(addr, GET_PRIVILEGED_TS);
+
+      printf("set_read_ts address: %p\n", addr);
 
     }
 
@@ -463,8 +465,9 @@ stm_wbctl_commit(stm_tx_t *tx)
     assert(new_privileged_ts % 2 == 1);
     // privileged_ts = commit_ts + 1
     SET_PRIVILEGED_TS(new_privileged_ts);
-    tx->privileged = 0;
-    ATOMIC_STORE_REL(&_tinystm.privileged, 0);
+    printf("privileged_ts changed to %lu\n", new_privileged_ts);
+    //tx->privileged = 0;
+    //ATOMIC_STORE_REL(&_tinystm.privileged, 0);
     return 1;
   }
 
@@ -532,6 +535,7 @@ stm_wbctl_commit(stm_tx_t *tx)
               printf("version (write-ts): %lu\n", write_ts);
               printf("read_ts:            %lu\n", read_ts);
               printf("privileged-ts:      %lu\n", privileged_ts);
+              printf("address: %p\n", w->addr);
               printf("\n");
       stm_rollback(tx, STM_ABORT_WW_CONFLICT);
       return 0;
@@ -575,7 +579,7 @@ stm_wbctl_commit(stm_tx_t *tx)
 #endif /* IRREVOCABLE_ENABLED */
 
   /* Try to validate (only if a concurrent transaction has committed since tx->start) */
-  if (unlikely(tx->start != t - 2 && !stm_wbctl_validate(tx))) {
+  if (unlikely(/*tx->start != t - 2 &&*/ !stm_wbctl_validate(tx))) {
     /* Cannot commit */
     printf("ABORTED ON COMMIT: validation failed\n");
     printf("\n");
