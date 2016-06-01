@@ -257,7 +257,7 @@ enum {                                  /* Transaction status */
 #define PRIVILEGED_TS                   (_tinystm.privileged_ts)
 
 #define GET_PRIVILEGED_TS               (ATOMIC_LOAD_ACQ(&PRIVILEGED_TS))
-//SET_PRIVILEGED_TS needed?
+#define SET_PRIVILEGED_TS(ts)           (ATOMIC_STORE_REL(&PRIVILEGED_TS, ts))
 #define FETCH_INC_PRIVILEGED_TS         (ATOMIC_FETCH_INC_FULL(&PRIVILEGED_TS)) //need fetch_and_add2
 #define FETCH_INC2_PRIVILEGED_TS        (ATOMIC_FETCH_ADD_FULL(&PRIVILEGED_TS, 2))
 

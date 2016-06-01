@@ -133,7 +133,10 @@ stm_wbctl_rollback(stm_tx_t *tx)
   }
 
 
-  while(ATOMIC_CAS_FULL(&_tinystm.privileged, 0, 1) == 0){}
+  while(ATOMIC_CAS_FULL(&_tinystm.privileged, 0, 1) == 0){
+    printf("couldn't become privileged\n");
+    printf("\n");
+  }
 
   tx->privileged = 1;
 
@@ -231,6 +234,11 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
       /* No: try to extend first (except for read-only transactions: no read set) */
       if (tx->attr.read_only || !stm_wbctl_extend(tx)) {
         /* Not much we can do: abort */
+        printf("ABORTED ON READ\n");
+        printf("version (write-ts): %lu\n", version);
+        printf("tx->end (valid-ts): %lu\n", tx->end);
+        printf("privileged-ts:      %lu\n", privileged_ts);
+        printf("\n");
         stm_rollback(tx, STM_ABORT_VAL_READ);
         return 0;
       }
@@ -337,6 +345,8 @@ stm_wbctl_write(stm_tx_t *tx, volatile stm_word_t *addr, stm_word_t value, stm_w
     if (stm_has_read(tx, lock) != NULL) {
       /* Read version must be older (otherwise, tx->end >= version) */
       /* Not much we can do: abort */
+      printf("ABORTED ON WRITE: an older version was read\n");
+      printf("\n");
       stm_rollback(tx, STM_ABORT_VAL_WRITE);
       return NULL;
     }
@@ -452,8 +462,7 @@ stm_wbctl_commit(stm_tx_t *tx)
     stm_word_t new_privileged_ts = FETCH_INC2_CLOCK + 1;
     assert(new_privileged_ts % 2 == 1);
     // privileged_ts = commit_ts + 1
-    PRIVILEGED_TS = new_privileged_ts;
-
+    SET_PRIVILEGED_TS(new_privileged_ts);
     tx->privileged = 0;
     ATOMIC_STORE_REL(&_tinystm.privileged, 0);
     return 1;
@@ -496,6 +505,8 @@ stm_wbctl_commit(stm_tx_t *tx)
 #endif /* IRREVOCABLE_ENABLED */
 
       /* Abort self */
+      printf("ABORTED ON COMMIT: try-lock failed: address %lu\n", w->addr);
+      printf("\n");
       stm_rollback(tx, STM_ABORT_WW_CONFLICT);
       return 0;
     }
@@ -517,6 +528,11 @@ stm_wbctl_commit(stm_tx_t *tx)
       (write_ts > privileged_ts && (write_ts % 2 == privileged_ts % 2))) {
 
       /* Abort self */
+      printf("ABORTED ON COMMIT\n");
+              printf("version (write-ts): %lu\n", write_ts);
+              printf("read_ts:            %lu\n", read_ts);
+              printf("privileged-ts:      %lu\n", privileged_ts);
+              printf("\n");
       stm_rollback(tx, STM_ABORT_WW_CONFLICT);
       return 0;
 
@@ -561,6 +577,8 @@ stm_wbctl_commit(stm_tx_t *tx)
   /* Try to validate (only if a concurrent transaction has committed since tx->start) */
   if (unlikely(tx->start != t - 2 && !stm_wbctl_validate(tx))) {
     /* Cannot commit */
+    printf("ABORTED ON COMMIT: validation failed\n");
+    printf("\n");
     stm_rollback(tx, STM_ABORT_VALIDATE);
     return 0;
   }
