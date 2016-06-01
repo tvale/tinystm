@@ -134,7 +134,7 @@ stm_wbctl_rollback(stm_tx_t *tx)
 
 
   while(ATOMIC_CAS_FULL(&_tinystm.privileged, 0, 1) == 0){
-    printf("couldn't become privileged\n");
+    printf("couldn't become privileged - tx address: %p\n", tx);
     printf("\n");
   }
 
