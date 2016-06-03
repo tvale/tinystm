@@ -132,22 +132,20 @@ stm_wbctl_rollback(stm_tx_t *tx)
     } while (tx->w_set.nb_acquired > 0);
   }
 
-/*
   while(ATOMIC_CAS_FULL(&_tinystm.privileged, 0, 1) == 0){
-    printf("couldn't become privileged - tx address: %p\n", tx);
-    printf("\n");
+    //printf("couldn't become privileged - tx address: %p\n", tx);
+    //printf("\n");
   }
 
   tx->privileged = 1;
-*/
+
 }
 
 static INLINE stm_word_t
 stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
 {
   volatile stm_word_t *lock;
-  stm_word_t l, l2, value, version;
-  unsigned long privileged_ts, privileged_ts2;
+  stm_word_t l, l2, value, version, privileged_ts;
   r_entry_t *r;
   w_entry_t *written = NULL;
 
@@ -177,9 +175,29 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
 
     if (tx->privileged){
 
-      SET_READ_TS(addr, GET_PRIVILEGED_TS);
+      //SET_READ_TS(addr, GET_PRIVILEGED_TS);
 
-      printf("set_read_ts address: %p\n", addr);
+      int success;
+      stm_word_t new_timestamp;
+
+      lock = GET_LOCK(addr);
+
+      do{
+        l = ATOMIC_LOAD_ACQ(lock);
+        new_timestamp = LOCK_SET_TIMESTAMP(GET_PRIVILEGED_TS);
+
+        if(LOCK_GET_OWNED(l)){
+          success = 0;
+        }
+        else{
+          value = ATOMIC_LOAD_ACQ(addr);
+          success = ATOMIC_CAS_FULL(lock, l, new_timestamp);
+        }
+      } while (success == 0);
+
+      //printf("read address and changed timestamp: %p\n", addr);
+
+      return value;
 
     }
 
@@ -217,9 +235,11 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
     }
 #endif /* IRREVOCABLE_ENABLED */
 
+    /*
     if(tx->privileged){
       goto return_value;
     }
+    */
 
     /* Check timestamp */
     version = LOCK_GET_TIMESTAMP(l);
@@ -236,11 +256,13 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
       /* No: try to extend first (except for read-only transactions: no read set) */
       if (tx->attr.read_only || !stm_wbctl_extend(tx)) {
         /* Not much we can do: abort */
+        /*
         printf("ABORTED ON READ\n");
         printf("version (write-ts): %lu\n", version);
         printf("tx->end (valid-ts): %lu\n", tx->end);
         printf("privileged-ts:      %lu\n", privileged_ts);
         printf("\n");
+        */
         stm_rollback(tx, STM_ABORT_VAL_READ);
         return 0;
       }
@@ -285,7 +307,7 @@ static INLINE w_entry_t *
 stm_wbctl_write(stm_tx_t *tx, volatile stm_word_t *addr, stm_word_t value, stm_word_t mask)
 {
   volatile stm_word_t *lock;
-  stm_word_t l, version, new_write_ts;
+  stm_word_t l, version, new_timestamp;
   w_entry_t *w;
 
   PRINT_DEBUG2("==> stm_wbctl_write(t=%p[%lu-%lu],a=%p,d=%p-%lu,m=0x%lx)\n",
@@ -309,8 +331,8 @@ stm_wbctl_write(stm_tx_t *tx, volatile stm_word_t *addr, stm_word_t value, stm_w
   if(tx->privileged){
       restart_irrevocable:
         l = ATOMIC_LOAD_ACQ(lock);
-        new_write_ts = LOCK_SET_TIMESTAMP(GET_CLOCK + 1);
-        if(LOCK_GET_OWNED(l) || ATOMIC_CAS_FULL(lock, l, new_write_ts) == 0)
+        new_timestamp = LOCK_SET_TIMESTAMP(GET_CLOCK + 1);
+        if(LOCK_GET_OWNED(l) || ATOMIC_CAS_FULL(lock, l, new_timestamp) == 0)
           goto restart_irrevocable;
 
         goto write_directly;
@@ -347,8 +369,10 @@ stm_wbctl_write(stm_tx_t *tx, volatile stm_word_t *addr, stm_word_t value, stm_w
     if (stm_has_read(tx, lock) != NULL) {
       /* Read version must be older (otherwise, tx->end >= version) */
       /* Not much we can do: abort */
+      /*
       printf("ABORTED ON WRITE: an older version was read\n");
       printf("\n");
+      */
       stm_rollback(tx, STM_ABORT_VAL_WRITE);
       return NULL;
     }
@@ -465,16 +489,20 @@ stm_wbctl_commit(stm_tx_t *tx)
     assert(new_privileged_ts % 2 == 1);
     // privileged_ts = commit_ts + 1
     SET_PRIVILEGED_TS(new_privileged_ts);
+    /*
     printf("privileged_ts changed to %lu\n", new_privileged_ts);
-    //tx->privileged = 0;
-    //ATOMIC_STORE_REL(&_tinystm.privileged, 0);
+    */
+
+    tx->privileged = 0;
+    ATOMIC_STORE_REL(&_tinystm.privileged, 0);
+
     return 1;
   }
 
   w_entry_t *w;
   stm_word_t t;
   int i;
-  stm_word_t l, value, read_ts, write_ts, privileged_ts;
+  stm_word_t l, value, timestamp, privileged_ts;
 
   PRINT_DEBUG("==> stm_wbctl_commit(%p[%lu-%lu])\n", tx, (unsigned long)tx->start, (unsigned long)tx->end);
 
@@ -508,8 +536,10 @@ stm_wbctl_commit(stm_tx_t *tx)
 #endif /* IRREVOCABLE_ENABLED */
 
       /* Abort self */
+      /*
       printf("ABORTED ON COMMIT: try-lock failed: address %lu\n", w->addr);
       printf("\n");
+      */
       stm_rollback(tx, STM_ABORT_WW_CONFLICT);
       return 0;
     }
@@ -523,20 +553,18 @@ stm_wbctl_commit(stm_tx_t *tx)
     w->version = LOCK_GET_TIMESTAMP(l);
     tx->w_set.nb_acquired++;
 
-    read_ts = ATOMIC_LOAD_ACQ(GET_READ_TS(w->addr));
-    write_ts = LOCK_GET_TIMESTAMP(l);
+    timestamp = LOCK_GET_TIMESTAMP(l);
     privileged_ts = GET_PRIVILEGED_TS;
     assert(privileged_ts % 2 == 1);
-    if(read_ts == privileged_ts ||
-      (write_ts > privileged_ts && (write_ts % 2 == privileged_ts % 2))) {
-
+    if(timestamp >= privileged_ts && (timestamp % 2 == privileged_ts % 2)){
       /* Abort self */
+      /*
       printf("ABORTED ON COMMIT\n");
-              printf("version (write-ts): %lu\n", write_ts);
-              printf("read_ts:            %lu\n", read_ts);
+              printf("version (timestamp): %lu\n", timestamp);
               printf("privileged-ts:      %lu\n", privileged_ts);
               printf("address: %p\n", w->addr);
               printf("\n");
+              */
       stm_rollback(tx, STM_ABORT_WW_CONFLICT);
       return 0;
 
@@ -581,8 +609,10 @@ stm_wbctl_commit(stm_tx_t *tx)
   /* Try to validate (only if a concurrent transaction has committed since tx->start) */
   if (unlikely(/*tx->start != t - 2 &&*/ !stm_wbctl_validate(tx))) {
     /* Cannot commit */
+    /*
     printf("ABORTED ON COMMIT: validation failed\n");
     printf("\n");
+    */
     stm_rollback(tx, STM_ABORT_VALIDATE);
     return 0;
   }
