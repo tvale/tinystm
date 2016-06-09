@@ -153,6 +153,35 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
 
   assert(IS_ACTIVE(tx->status));
 
+
+  if (tx->privileged){
+
+    //SET_READ_TS(addr, GET_PRIVILEGED_TS);
+
+    int success = 0;
+    stm_word_t new_timestamp;
+
+    lock = GET_LOCK(addr);
+
+    do{
+      l = ATOMIC_LOAD_ACQ(lock);
+      new_timestamp = LOCK_SET_TIMESTAMP(GET_PRIVILEGED_TS);
+
+      if(LOCK_GET_OWNED(l)){
+        success = 0;
+      }
+      else{
+        value = ATOMIC_LOAD_ACQ(addr);
+        success = ATOMIC_CAS_FULL(lock, l, new_timestamp);
+      }
+    } while (success == 0);
+
+    //printf("read address and changed timestamp: %p\n", addr);
+
+    return value;
+
+  }
+
   /* Did we previously write the same address? */
   written = stm_has_written(tx, addr);
   if (written != NULL) {
@@ -172,34 +201,6 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
 
     }
 #endif /* IRREVOCABLE_ENABLED */
-
-    if (tx->privileged){
-
-      //SET_READ_TS(addr, GET_PRIVILEGED_TS);
-
-      int success;
-      stm_word_t new_timestamp;
-
-      lock = GET_LOCK(addr);
-
-      do{
-        l = ATOMIC_LOAD_ACQ(lock);
-        new_timestamp = LOCK_SET_TIMESTAMP(GET_PRIVILEGED_TS);
-
-        if(LOCK_GET_OWNED(l)){
-          success = 0;
-        }
-        else{
-          value = ATOMIC_LOAD_ACQ(addr);
-          success = ATOMIC_CAS_FULL(lock, l, new_timestamp);
-        }
-      } while (success == 0);
-
-      //printf("read address and changed timestamp: %p\n", addr);
-
-      return value;
-
-    }
 
   /* Get reference to lock */
   lock = GET_LOCK(addr);
@@ -254,7 +255,7 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
         //or (write-ts(x) > privileged-ts and parity(write-ts(x)) = parity(privileged-ts))
        (version > privileged_ts && (version % 2 == privileged_ts % 2))) {
       /* No: try to extend first (except for read-only transactions: no read set) */
-      if (tx->attr.read_only || !stm_wbctl_extend(tx)) {
+      //if (tx->attr.read_only || !stm_wbctl_extend(tx)) {
         /* Not much we can do: abort */
         /*
         printf("ABORTED ON READ\n");
@@ -265,7 +266,7 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
         */
         stm_rollback(tx, STM_ABORT_VAL_READ);
         return 0;
-      }
+      //}
       /* Verify that version has not been overwritten (read value has not
        * yet been added to read set and may have not been checked during
        * extend) */
