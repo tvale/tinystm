@@ -139,6 +139,7 @@ stm_wbctl_rollback(stm_tx_t *tx)
 
   tx->privileged = 1;
 
+
 }
 
 static INLINE stm_word_t
@@ -162,10 +163,19 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
     stm_word_t new_timestamp;
 
     lock = GET_LOCK(addr);
+    l = ATOMIC_LOAD_ACQ(lock);
+    if(!LOCK_GET_OWNED(l)){
+      version = LOCK_GET_TIMESTAMP(l);
+      if(version > GET_PRIVILEGED_TS && (version % 2 == 1)){
+        value = ATOMIC_LOAD_ACQ(addr);
+        return value;
+      }
+    }
 
     do{
       l = ATOMIC_LOAD_ACQ(lock);
       new_timestamp = LOCK_SET_TIMESTAMP(GET_PRIVILEGED_TS);
+      assert(!LOCK_GET_OWNED(new_timestamp));
 
       if(LOCK_GET_OWNED(l)){
         success = 0;
@@ -175,9 +185,9 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
         success = ATOMIC_CAS_FULL(lock, l, new_timestamp);
       }
     } while (success == 0);
-
-    //printf("read address and changed timestamp: %p\n", addr);
-
+/*
+    printf("read address and changed timestamp: %p\n", addr);
+*/
     return value;
 
   }
@@ -257,13 +267,15 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
       /* No: try to extend first (except for read-only transactions: no read set) */
       //if (tx->attr.read_only || !stm_wbctl_extend(tx)) {
         /* Not much we can do: abort */
-        /*
+/*
         printf("ABORTED ON READ\n");
-        printf("version (write-ts): %lu\n", version);
-        printf("tx->end (valid-ts): %lu\n", tx->end);
-        printf("privileged-ts:      %lu\n", privileged_ts);
+        printf("version (lock): %lu\n", (unsigned long)version);
+        printf("tx->end (valid-ts): %lu\n", (unsigned long)tx->end);
+        printf("privileged-ts:      %lu\n", (unsigned long)privileged_ts);
+        printf("address:      %p\n", addr);
+        printf("tx:      %p\n", tx);
         printf("\n");
-        */
+*/
         stm_rollback(tx, STM_ABORT_VAL_READ);
         return 0;
       //}
@@ -279,7 +291,15 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
     }
   }
   /* We have a good version: add to read set (update transactions) and return value */
-
+/*
+  printf("SUCCESSFUL READ\n");
+  printf("version (lock): %lu\n", (unsigned long)version);
+  printf("tx->end (valid-ts): %lu\n", (unsigned long)tx->end);
+  printf("privileged-ts:      %lu\n", (unsigned long)privileged_ts);
+  printf("address:      %p\n", addr);
+  printf("tx:      %p\n", tx);
+  printf("\n");
+*/
   /* Did we previously write the same address? */
   if (written != NULL) {
     value = (value & ~written->mask) | (written->value & written->mask);
@@ -335,7 +355,12 @@ stm_wbctl_write(stm_tx_t *tx, volatile stm_word_t *addr, stm_word_t value, stm_w
         new_timestamp = LOCK_SET_TIMESTAMP(GET_CLOCK + 1);
         if(LOCK_GET_OWNED(l) || ATOMIC_CAS_FULL(lock, l, new_timestamp) == 0)
           goto restart_irrevocable;
-
+/*
+        printf("PRIVILEGED WROTE\n");
+        printf("address:            %p\n", addr);
+        printf("new timestamp:      %lu\n", (unsigned long) LOCK_GET_TIMESTAMP(new_timestamp));
+        printf("\n");
+        */
         goto write_directly;
     }
 
@@ -370,10 +395,10 @@ stm_wbctl_write(stm_tx_t *tx, volatile stm_word_t *addr, stm_word_t value, stm_w
     if (stm_has_read(tx, lock) != NULL) {
       /* Read version must be older (otherwise, tx->end >= version) */
       /* Not much we can do: abort */
-      /*
+/*
       printf("ABORTED ON WRITE: an older version was read\n");
       printf("\n");
-      */
+*/
       stm_rollback(tx, STM_ABORT_VAL_WRITE);
       return NULL;
     }
@@ -381,6 +406,11 @@ stm_wbctl_write(stm_tx_t *tx, volatile stm_word_t *addr, stm_word_t value, stm_w
   /* Acquire lock (ETL) */
   /* We own the lock here (ETL) */
 do_write:
+/*
+  printf("SPECULATIVE WROTE\n");
+  printf("address:      %p\n", addr);
+  printf("\n");
+  */
   /* Add address to write set */
   if (tx->w_set.nb_entries == tx->w_set.size)
     stm_allocate_ws_entries(tx, 1);
@@ -424,7 +454,7 @@ write_directly:
           stm_word_t old_value = ATOMIC_LOAD(addr);
           value = (old_value & ~mask) | (value & mask);
         }
-        ATOMIC_STORE(addr, value);
+        ATOMIC_STORE_REL(addr, value);
       }
   }
 
@@ -490,9 +520,9 @@ stm_wbctl_commit(stm_tx_t *tx)
     assert(new_privileged_ts % 2 == 1);
     // privileged_ts = commit_ts + 1
     SET_PRIVILEGED_TS(new_privileged_ts);
-    /*
-    printf("privileged_ts changed to %lu\n", new_privileged_ts);
-    */
+/*
+    printf("privileged_ts changed to %lu\n", (unsigned long)new_privileged_ts);
+*/
 
     tx->privileged = 0;
     ATOMIC_STORE_REL(&_tinystm.privileged, 0);
@@ -537,10 +567,10 @@ stm_wbctl_commit(stm_tx_t *tx)
 #endif /* IRREVOCABLE_ENABLED */
 
       /* Abort self */
-      /*
-      printf("ABORTED ON COMMIT: try-lock failed: address %lu\n", w->addr);
+/*
+      printf("ABORTED ON COMMIT: try-lock failed: address %p\n", w->addr);
       printf("\n");
-      */
+*/
       stm_rollback(tx, STM_ABORT_WW_CONFLICT);
       return 0;
     }
@@ -559,13 +589,13 @@ stm_wbctl_commit(stm_tx_t *tx)
     assert(privileged_ts % 2 == 1);
     if(timestamp >= privileged_ts && (timestamp % 2 == privileged_ts % 2)){
       /* Abort self */
-      /*
+/*
       printf("ABORTED ON COMMIT\n");
-              printf("version (timestamp): %lu\n", timestamp);
-              printf("privileged-ts:      %lu\n", privileged_ts);
+              printf("version (timestamp): %lu\n", (unsigned long)timestamp);
+              printf("privileged-ts:      %lu\n", (unsigned long)privileged_ts);
               printf("address: %p\n", w->addr);
               printf("\n");
-              */
+*/
       stm_rollback(tx, STM_ABORT_WW_CONFLICT);
       return 0;
 
@@ -610,10 +640,10 @@ stm_wbctl_commit(stm_tx_t *tx)
   /* Try to validate (only if a concurrent transaction has committed since tx->start) */
   if (unlikely(/*tx->start != t - 2 &&*/ !stm_wbctl_validate(tx))) {
     /* Cannot commit */
-    /*
+/*
     printf("ABORTED ON COMMIT: validation failed\n");
     printf("\n");
-    */
+*/
     stm_rollback(tx, STM_ABORT_VALIDATE);
     return 0;
   }
