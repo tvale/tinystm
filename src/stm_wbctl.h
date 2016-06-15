@@ -160,21 +160,12 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
     //SET_READ_TS(addr, GET_PRIVILEGED_TS);
 
     int success = 0;
-    stm_word_t new_timestamp;
+    stm_word_t new_timestamp = LOCK_SET_TIMESTAMP(GET_PRIVILEGED_TS);
 
     lock = GET_LOCK(addr);
-    l = ATOMIC_LOAD_ACQ(lock);
-    if(!LOCK_GET_OWNED(l)){
-      version = LOCK_GET_TIMESTAMP(l);
-      if(version > GET_PRIVILEGED_TS && (version % 2 == 1)){
-        value = ATOMIC_LOAD_ACQ(addr);
-        return value;
-      }
-    }
 
     do{
       l = ATOMIC_LOAD_ACQ(lock);
-      new_timestamp = LOCK_SET_TIMESTAMP(GET_PRIVILEGED_TS);
       assert(!LOCK_GET_OWNED(new_timestamp));
 
       if(LOCK_GET_OWNED(l)){
@@ -182,7 +173,16 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
       }
       else{
         value = ATOMIC_LOAD_ACQ(addr);
-        success = ATOMIC_CAS_FULL(lock, l, new_timestamp);
+
+        version = LOCK_GET_TIMESTAMP(l);
+
+        if(version > GET_PRIVILEGED_TS && (version % 2 == 1)){
+          l2 = ATOMIC_LOAD_ACQ(lock);
+          success = (l == l2);
+        }
+        else{
+          success = ATOMIC_CAS_FULL(lock, l, new_timestamp);
+        }
       }
     } while (success == 0);
 /*
@@ -255,7 +255,7 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
     /* Check timestamp */
     version = LOCK_GET_TIMESTAMP(l);
 
-    privileged_ts = GET_PRIVILEGED_TS; //new - comment this
+    privileged_ts = tx->privileged_snapshot;
 
     assert(privileged_ts % 2 == 1);
 
@@ -264,6 +264,7 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
     if (version > tx->end ||
         //or (write-ts(x) > privileged-ts and parity(write-ts(x)) = parity(privileged-ts))
        (version > privileged_ts && (version % 2 == privileged_ts % 2))) {
+
       /* No: try to extend first (except for read-only transactions: no read set) */
       //if (tx->attr.read_only || !stm_wbctl_extend(tx)) {
         /* Not much we can do: abort */
@@ -360,7 +361,7 @@ stm_wbctl_write(stm_tx_t *tx, volatile stm_word_t *addr, stm_word_t value, stm_w
         printf("address:            %p\n", addr);
         printf("new timestamp:      %lu\n", (unsigned long) LOCK_GET_TIMESTAMP(new_timestamp));
         printf("\n");
-        */
+*/
         goto write_directly;
     }
 
@@ -382,6 +383,14 @@ stm_wbctl_write(stm_tx_t *tx, volatile stm_word_t *addr, stm_word_t value, stm_w
   }
   /* Handle write after reads (before CAS) */
   version = LOCK_GET_TIMESTAMP(l);
+
+  /* New stuff testing
+  if(version >= tx->privileged_snapshot && (version % 2 == 1)){
+    // Abort self
+    stm_rollback(tx, STM_ABORT_VAL_WRITE);
+    return NULL;
+  }
+  */
 
  acquire:
   if (version > tx->end) {
@@ -410,7 +419,7 @@ do_write:
   printf("SPECULATIVE WROTE\n");
   printf("address:      %p\n", addr);
   printf("\n");
-  */
+*/
   /* Add address to write set */
   if (tx->w_set.nb_entries == tx->w_set.size)
     stm_allocate_ws_entries(tx, 1);
@@ -585,7 +594,7 @@ stm_wbctl_commit(stm_tx_t *tx)
     tx->w_set.nb_acquired++;
 
     timestamp = LOCK_GET_TIMESTAMP(l);
-    privileged_ts = GET_PRIVILEGED_TS;
+    privileged_ts = tx->privileged_snapshot;
     assert(privileged_ts % 2 == 1);
     if(timestamp >= privileged_ts && (timestamp % 2 == privileged_ts % 2)){
       /* Abort self */

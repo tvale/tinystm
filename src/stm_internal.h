@@ -332,6 +332,7 @@ typedef struct stm_tx {                 /* Transaction descriptor */
   volatile stm_word_t status;           /* Transaction status */
   stm_word_t start;                     /* Start timestamp */
   stm_word_t end;                       /* End timestamp (validity range) */
+  stm_word_t privileged_snapshot;       /* Privileged timestamp when the transaction started */
   r_set_t r_set;                        /* Read set */
   w_set_t w_set;                        /* Write set */
   unsigned int privileged;
@@ -922,6 +923,7 @@ int_stm_prepare(stm_tx_t *tx)
  start:
   /* Start timestamp */
   tx->start = tx->end = GET_CLOCK; /* OPT: Could be delayed until first read/write */
+  tx->privileged_snapshot = GET_PRIVILEGED_TS;
   if (unlikely(tx->start >= VERSION_MAX)) {
     /* Block all transactions and reset clock */
     stm_quiesce_barrier(tx, rollover_clock, NULL);
