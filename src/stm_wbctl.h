@@ -160,7 +160,7 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
     //SET_READ_TS(addr, GET_PRIVILEGED_TS);
 
     int success = 0;
-    stm_word_t new_timestamp = LOCK_SET_TIMESTAMP(GET_PRIVILEGED_TS);
+    stm_word_t new_timestamp;
 
     lock = GET_LOCK(addr);
 
@@ -181,6 +181,10 @@ stm_wbctl_read(stm_tx_t *tx, volatile stm_word_t *addr)
           success = (l == l2);
         }
         else{
+          if(version > GET_PRIVILEGED_TS)
+            new_timestamp = LOCK_SET_TIMESTAMP(version + 1);
+          else
+            new_timestamp = LOCK_SET_TIMESTAMP(GET_PRIVILEGED_TS);
           success = ATOMIC_CAS_FULL(lock, l, new_timestamp);
         }
       }
