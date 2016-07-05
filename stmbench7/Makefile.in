@@ -128,7 +128,7 @@ CUSTOM_MM_LIB_DIR=/home/aleksandar/work/epfl/gc/work/heaplayers-3.7/target/dist
 # set the build profile (default=normal)
 CPPFLAGS_normal  =  -ggdb -O3
 CPPFLAGS_fast    =  -DNDEBUG -O3
-CPPFLAGS_debug   =  -ggdb -O0
+CPPFLAGS_debug   =  -ggdb -Og
 CPPFLAGS_gp0     =  -ggdb -pg -O0
 CPPFLAGS_gp      =  -ggdb -pg -O3
 ifeq ($(PROFILE), )
