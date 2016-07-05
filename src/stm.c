@@ -270,6 +270,10 @@ stm_init(void)
   memset((void *)_tinystm.locks, 0, LOCK_ARRAY_SIZE * sizeof(/*two_timestamp_lock_t*/ stm_word_t));
   CLOCK = 2;
   PRIVILEGED_TS = 1;
+  TOTAL_CLOCK = 0;
+  HIGHEST_COMMIT = 0;
+  _tinystm.privileged = 0;
+  //PRIVILEGED_WROTE = 0;
 
   stm_quiesce_init();
 

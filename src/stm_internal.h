@@ -204,6 +204,26 @@ enum {                                  /* Transaction status */
 #endif /* CM == CM_MODULAR */
 #define LOCK_GET_TIMESTAMP(l)           (l >> (LOCK_BITS))
 #define LOCK_SET_TIMESTAMP(t)           ((t) << (LOCK_BITS))
+
+#define GET_WRITE_TS_FROM_TIMESTAMP(t)  ((t) & TIMESTAMP_MASK)//CHANGE
+
+#define TIMESTAMP_MASK                  (0x3FFFFFFF)  //2^30
+
+#define LOCK_BUILD_WRITE_TS(t)          ((t) & TIMESTAMP_MASK)
+#define LOCK_BUILD_READ_TS(t)           (((long unsigned int)t) << 30)
+
+#define LOCK_SET_WRITE_TS(l, t)         LOCK_SET_TIMESTAMP( \
+                                        (LOCK_GET_TIMESTAMP((unsigned long) l) & ~TIMESTAMP_MASK) | \
+                                        (LOCK_BUILD_WRITE_TS(t)) \
+                                        )
+#define LOCK_SET_READ_TS(l, t)          LOCK_SET_TIMESTAMP( \
+                                        (LOCK_GET_TIMESTAMP((unsigned long) l) & TIMESTAMP_MASK) | \
+                                        (LOCK_BUILD_READ_TS(t)) \
+                                        )
+
+#define LOCK_GET_WRITE_TS(l)            (LOCK_GET_TIMESTAMP(l) & TIMESTAMP_MASK)
+#define LOCK_GET_READ_TS(l)             ((LOCK_GET_TIMESTAMP(l) >> 30) & TIMESTAMP_MASK)
+
 #define LOCK_GET_INCARNATION(l)         ((l & INCARNATION_MASK) >> OWNED_BITS)
 #define LOCK_SET_INCARNATION(i)         (i << OWNED_BITS)   /* OWNED bit not set */
 #define LOCK_UPD_INCARNATION(l, i)      ((l & ~(stm_word_t)(INCARNATION_MASK | OWNED_MASK)) | LOCK_SET_INCARNATION(i))
@@ -247,19 +267,36 @@ enum {                                  /* Transaction status */
 #define CLOCK                           (_tinystm.gclock[(CACHELINE_SIZE * 2) / sizeof(stm_word_t)])
 
 #define GET_CLOCK                       (ATOMIC_LOAD_ACQ(&CLOCK))
-#define FETCH_INC_CLOCK                 (ATOMIC_FETCH_INC_FULL(&CLOCK)) //need fetch_and_add2
+#define FETCH_INC_CLOCK                 (ATOMIC_FETCH_INC_FULL(&CLOCK))
 #define FETCH_INC2_CLOCK                (ATOMIC_FETCH_ADD_FULL(&CLOCK, 2))
+
+#define TOTAL_CLOCK                     (_tinystm.total_order_clock)
+
+#define GET_TOTAL_CLOCK                 (ATOMIC_LOAD_ACQ(&TOTAL_CLOCK))
+#define FETCH_INC_TOTAL_CLOCK           (ATOMIC_FETCH_INC_FULL(&TOTAL_CLOCK))
+
+#define HIGHEST_COMMIT                  (_tinystm.highest_commit)
+
+#define GET_HIGHEST_COMMIT              (ATOMIC_LOAD_ACQ(&HIGHEST_COMMIT))
+#define SET_HIGHEST_COMMIT(h)           (ATOMIC_STORE_REL(&HIGHEST_COMMIT, h))
 
 /* ################################################################### *
  * //PRIVILEGED TIMESTAMP
  * ################################################################### */
 
 #define PRIVILEGED_TS                   (_tinystm.privileged_ts)
+//#define PRIVILEGED_WROTE                (_tinystm.privileged_wrote)
 
 #define GET_PRIVILEGED_TS               (ATOMIC_LOAD_ACQ(&PRIVILEGED_TS))
 #define SET_PRIVILEGED_TS(ts)           (ATOMIC_STORE_REL(&PRIVILEGED_TS, ts))
 #define FETCH_INC_PRIVILEGED_TS         (ATOMIC_FETCH_INC_FULL(&PRIVILEGED_TS)) //need fetch_and_add2
 #define FETCH_INC2_PRIVILEGED_TS        (ATOMIC_FETCH_ADD_FULL(&PRIVILEGED_TS, 2))
+
+/*
+#define SET_PRIVILEGED_WROTE            (ATOMIC_STORE_REL(&PRIVILEGED_WROTE, 1))
+#define RESET_PRIVILEGED_WROTE          (ATOMIC_STORE_REL(&PRIVILEGED_WROTE, 0))
+#define GET_PRIVILEGED_WROTE            (ATOMIC_LOAD_ACQ(&PRIVILEGED_WROTE))
+*/
 
 /* ################################################################### *
  * CALLBACKS
@@ -333,6 +370,15 @@ typedef struct stm_tx {                 /* Transaction descriptor */
   stm_word_t start;                     /* Start timestamp */
   stm_word_t end;                       /* End timestamp (validity range) */
   stm_word_t privileged_snapshot;       /* Privileged timestamp when the transaction started */
+  stm_word_t total_order_snapshot;
+  long int nb_aborts;                 /* Number of times this transaction has aborted */
+  int abort_invalid_read;
+  int abort_older_version_was_read;
+  int abort_try_lock_failed;
+  int abort_spec_wrote_over_priv_read;
+  int abort_spec_wrote_over_priv_write;
+  int abort_spec_wrote_over_priv_read_and_write;
+  int abort_validation_failed;
   r_set_t r_set;                        /* Read set */
   w_set_t w_set;                        /* Write set */
   unsigned int privileged;
@@ -381,7 +427,10 @@ typedef struct stm_tx {                 /* Transaction descriptor */
 typedef struct {
   volatile /*two_timestamp_lock_t*/ stm_word_t locks[LOCK_ARRAY_SIZE] ALIGNED;
   volatile stm_word_t gclock[512 / sizeof(stm_word_t)] ALIGNED;
+  volatile stm_word_t total_order_clock;
+  volatile stm_word_t highest_commit;
   volatile stm_word_t privileged_ts;
+  //volatile stm_word_t privileged_wrote;
   unsigned int nb_specific;             /* Number of specific slots used (<= MAX_SPECIFIC) */
   unsigned int nb_init_cb;
   cb_entry_t init_cb[MAX_CB];           /* Init thread callbacks */
@@ -396,7 +445,7 @@ typedef struct {
   unsigned int nb_abort_cb;
   cb_entry_t abort_cb[MAX_CB];          /* Abort callbacks */
   unsigned int initialized;             /* Has the library been initialized? */
-  volatile stm_word_t privileged;
+  volatile int privileged;
 #ifdef IRREVOCABLE_ENABLED
   volatile stm_word_t irrevocable;      /* Irrevocability status */
 #endif /* IRREVOCABLE_ENABLED */
@@ -925,6 +974,7 @@ int_stm_prepare(stm_tx_t *tx)
   tx->start = tx->end = GET_CLOCK; /* OPT: Could be delayed until first read/write */
   tx->privileged_snapshot = GET_PRIVILEGED_TS;
   if (unlikely(tx->start >= VERSION_MAX)) {
+    printf("ROLLOVER CLOCK\n");
     /* Block all transactions and reset clock */
     stm_quiesce_barrier(tx, rollover_clock, NULL);
     goto start;
@@ -1287,12 +1337,22 @@ int_stm_init_thread(void)
     printf("\n");
   }
 #endif /* IRREVOCABLE_ENABLED */
-  if(ATOMIC_CAS_FULL(&_tinystm.privileged, 0, 1) != 0){
-    tx->privileged = 1;
+  if(ATOMIC_CAS_FULL(&_tinystm.privileged, 0, 0/*change*/) != 0){
+    tx->privileged = 0/*change*/;
   }
   else{
     tx->privileged = 0;
   }
+
+  //tx->nb_aborts = 0;
+
+  tx->abort_invalid_read = 0;
+  tx->abort_older_version_was_read = 0;
+  tx->abort_try_lock_failed = 0;
+  tx->abort_spec_wrote_over_priv_read = 0;
+  tx->abort_spec_wrote_over_priv_write = 0;
+  tx->abort_spec_wrote_over_priv_read_and_write = 0;
+  tx->abort_validation_failed = 0;
 
   /* Store as thread-local data */
   tls_set_tx(tx);
@@ -1369,6 +1429,8 @@ int_stm_start(stm_tx_t *tx, stm_tx_attr_t attr)
 
   /* Attributes */
   tx->attr = attr;
+
+  //tx->total_order_snapshot = FETCH_INC_TOTAL_CLOCK;
 
   /* Initialize transaction descriptor */
   int_stm_prepare(tx);
