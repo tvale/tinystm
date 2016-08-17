@@ -118,7 +118,7 @@ void sb7::Benchmark::start() {
 	}
 
 	// wait for experiment to finish
-	sleep(parameters.getExperimentLengthMs());
+	// sleep(parameters.getExperimentLengthMs());
 
 	// signal all threads to stop
 	for(int i = 0;i < parameters.getThreadNum();i++) {
@@ -240,10 +240,10 @@ void sb7::Benchmark::reportStats(ostream &out) {
 		<< endl;
 
 	// TODO use constant for 1000 - ms in s
-	//double totalThroughput = (double)totalSuccess / elapsedTime * 1000;
-	//double totalTThroughput = (double)total / elapsedTime * 1000;
-	double totalThroughput = (double)totalSuccess / parameters.getExperimentLengthMs() * 1000;
-	double totalTThroughput = (double)total / parameters.getExperimentLengthMs() * 1000;
+	double totalThroughput = (double)totalSuccess / elapsedTime * 1000;
+	double totalTThroughput = (double)total / elapsedTime * 1000;
+	//double totalThroughput = (double)totalSuccess / parameters.getExperimentLengthMs() * 1000;
+	//double totalTThroughput = (double)total / parameters.getExperimentLengthMs() * 1000;
 
 	out << "Total throughput: " << totalThroughput << " op/s"
 		<< "  (" << totalTThroughput << " op/s including failed)"

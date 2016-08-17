@@ -120,12 +120,15 @@ void *sb7::worker_thread(void *data) {
 	WorkerThreadData *wtdata = (WorkerThreadData *)data;
 	bool hintRo = parameters.shouldHintRo();
 
-	while(!wtdata->stopped) {
+	int ops_done = 0;
+
+	while(ops_done != parameters.getExperimentLengthMs()) {
 		int opind = wtdata->getOperationRndInd();
 		const Operation *op = wtdata->operations->getOperations()[opind];
 
 		// check if operation is read only
 		stm_tx_attr_t _a;
+ 		_a.attrs = 0; // stack objects are not zero'd Aleksandar!
 		_a.read_only = hintRo && op->isReadOnly();
 
 		volatile bool abort = false;
@@ -152,8 +155,8 @@ void *sb7::worker_thread(void *data) {
 				// transaction body
 				op->run();
 			} catch (Sb7Exception) {
-				abort = true;
 				::stm_abort(STM_ABORT_NO_RETRY);
+				abort = true;
 				siglongjmp(*_e, STM_ABORT_NO_RETRY);
 			}
 
@@ -166,6 +169,8 @@ void *sb7::worker_thread(void *data) {
 			mem_tx_abort();
 			obj_log_tx_abort();
 				
+ 			++ops_done;
+
 			wtdata->failed_ops[opind]++;
 
 			// skip this calculation below
@@ -174,6 +179,8 @@ void *sb7::worker_thread(void *data) {
 
 		// get end time
 		long end_time = get_time_ms();
+
+ 		++ops_done;
 
 		wtdata->successful_ops[opind]++;
 		long ttc = end_time - start_time;
